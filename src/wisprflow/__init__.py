@@ -1,2 +1,1 @@
-def main() -> None:
-    print("Hello from wisprflow!")
+"""WhisperScribe local dictation app."""

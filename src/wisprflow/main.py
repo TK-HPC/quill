@@ -1,14 +1,14 @@
 import math
 import os
-from pathlib import Path
 import socket
 import subprocess
 import time
 import tkinter as tk
+from pathlib import Path
 
 import pyperclip
 
-from transcriber import Transcriber
+from .transcriber import Transcriber
 
 SOCKET_PATH = f"/tmp/wisprflow-{os.getuid()}.sock"
 WIDTH = 108
@@ -78,6 +78,7 @@ class Capsule:
             ],
             capture_output=True,
             text=True,
+            check=False,
         )
         print(transcript, flush=True)
         self._show_copied()
@@ -142,7 +143,7 @@ def toggle_running_app():
         client.close()
 
 
-if __name__ == "__main__":
+def main():
     if not toggle_running_app():
         Path(SOCKET_PATH).unlink(missing_ok=True)
         app = Capsule()

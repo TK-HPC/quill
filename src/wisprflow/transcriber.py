@@ -1,12 +1,13 @@
 import os
 import subprocess
+import sys
 import threading
 import wave
 
 import numpy as np
 import pyaudio
 
-ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
+ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
 OUTPUT_PATH = os.path.join(ROOT_DIR, "1.wav")
 MODEL_PATH = os.path.join(ROOT_DIR, "model/Qwen3-ASR-1.7B-Q4_K_M.gguf")
 KEYWORDS_PATH = os.path.join(ROOT_DIR, "keywords.txt")
@@ -36,7 +37,7 @@ class Transcriber:
         try:
             frames = self._record()
             self.transcript = self._transcribe(frames)
-        except Exception as error:
+        except Exception as error:  # noqa: BLE001 - report worker failures to the capsule
             self.error = error
 
     def _record(self):
@@ -69,12 +70,24 @@ class Transcriber:
             output.setframerate(RATE)
             output.writeframes(b"".join(frames))
 
-        result = subprocess.run(
-            [CLI_PATH, "-m", MODEL_PATH, "--vocabulary-file", KEYWORDS_PATH, OUTPUT_PATH],
-            capture_output=True,
-            text=True,
-            check=True,
-        )
+        command = [CLI_PATH, "-m", MODEL_PATH, "--vocabulary-file", KEYWORDS_PATH, OUTPUT_PATH]
+        for backend in ("auto", "cpu"):
+            try:
+                result = subprocess.run(
+                    [*command, "--backend", backend],
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                )
+                break
+            except subprocess.CalledProcessError as error:
+                print(
+                    f"WhisperScribe: {backend} transcription failed:\n{error.stderr or error}",
+                    file=sys.stderr, flush=True,
+                )
+                if backend == "cpu":
+                    raise
+                print("WhisperScribe: retrying on CPU.", file=sys.stderr, flush=True)
         for line in result.stdout.splitlines():
             if line.startswith("text: "):
                 return line.removeprefix("text: ").strip()

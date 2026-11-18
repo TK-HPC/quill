@@ -1,0 +1,108 @@
+import subprocess
+import tempfile
+import unittest
+import wave
+from pathlib import Path
+from unittest.mock import patch
+
+from wisprflow import transcriber
+
+
+class TranscriberTests(unittest.TestCase):
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        self.output = str(Path(self.directory.name) / "recording.wav")
+        self.original_output = transcriber.OUTPUT_PATH
+        output_patch = patch.object(transcriber, "OUTPUT_PATH", self.output)
+        output_patch.start()
+        self.addCleanup(output_patch.stop)
+
+    @patch.object(transcriber.subprocess, "run")
+    def test_writes_pcm_and_returns_transcript(self, run):
+        run.return_value = subprocess.CompletedProcess([], 0, "timing: 1s\ntext: hello world  \n")
+        frames = [b"\x00\x00", b"\x01\x00"]
+
+        self.assertEqual(transcriber.Transcriber._transcribe(frames), "hello world")
+
+        with wave.open(self.output) as recording:
+            self.assertEqual(recording.getnchannels(), 1)
+            self.assertEqual(recording.getsampwidth(), 2)
+            self.assertEqual(recording.getframerate(), 16000)
+            self.assertEqual(recording.readframes(2), b"".join(frames))
+        run.assert_called_once()
+        command = run.call_args.args[0]
+        self.assertEqual(command[0], transcriber.CLI_PATH)
+        self.assertEqual(command[command.index("-m") + 1], transcriber.MODEL_PATH)
+        self.assertEqual(command[command.index("--vocabulary-file") + 1], transcriber.KEYWORDS_PATH)
+        self.assertIn(self.output, command)
+        self.assertEqual(command[-2:], ["--backend", "auto"])
+        self.assertEqual(run.call_args.kwargs, {"capture_output": True, "text": True, "check": True})
+
+    @patch.object(transcriber.subprocess, "run")
+    def test_missing_transcript_is_an_error(self, run):
+        run.return_value = subprocess.CompletedProcess([], 0, "timing: 1s\n")
+        with self.assertRaisesRegex(RuntimeError, "no transcript"):
+            transcriber.Transcriber._transcribe([])
+        run.assert_called_once()
+
+    def test_worker_reports_errors_to_capsule(self):
+        recorder = transcriber.Transcriber()
+        error = RuntimeError("transcription failed")
+        with (
+            patch.object(recorder, "_record", return_value=[]),
+            patch.object(recorder, "_transcribe", side_effect=error),
+        ):
+            recorder._run()
+        self.assertIs(recorder.error, error)
+        self.assertIsNone(recorder.transcript)
+
+    @patch.object(transcriber.subprocess, "run")
+    def test_gpu_failure_retries_same_recording_on_cpu(self, run):
+        for code, message in ((1, "CUDA out of memory"), (-6, "CUDA error"), (1, "No CUDA devices")):
+            with self.subTest(message=message):
+                run.reset_mock()
+                run.side_effect = [
+                    subprocess.CalledProcessError(code, [], stderr=message),
+                    subprocess.CompletedProcess([], 0, "text: CPU transcript\n"),
+                ]
+                with patch("sys.stderr") as stderr:
+                    self.assertEqual(transcriber.Transcriber._transcribe([]), "CPU transcript")
+                self.assertEqual(run.call_count, 2)
+                automatic, cpu = [call.args[0] for call in run.call_args_list]
+                self.assertEqual(cpu, [*automatic[:-1], "cpu"])
+                self.assertIn(message, "".join(call.args[0] for call in stderr.write.call_args_list))
+
+    @patch.object(transcriber.subprocess, "run")
+    def test_cpu_failure_is_reported_without_further_retries(self, run):
+        gpu_error = subprocess.CalledProcessError(1, [], stderr="CUDA out of memory")
+        cpu_error = subprocess.CalledProcessError(1, [], stderr="CPU allocation failed")
+        run.side_effect = [gpu_error, cpu_error]
+        with (
+            patch("sys.stderr") as stderr,
+            self.assertRaises(subprocess.CalledProcessError) as raised,
+        ):
+            transcriber.Transcriber._transcribe([])
+        self.assertIs(raised.exception, cpu_error)
+        self.assertEqual(run.call_count, 2)
+        messages = "".join(call.args[0] for call in stderr.write.call_args_list)
+        self.assertIn(gpu_error.stderr, messages)
+        self.assertIn(cpu_error.stderr, messages)
+
+    @patch.object(transcriber.subprocess, "run", side_effect=FileNotFoundError("missing CLI"))
+    def test_missing_cli_is_not_retried(self, run):
+        with self.assertRaises(FileNotFoundError):
+            transcriber.Transcriber._transcribe([])
+        run.assert_called_once()
+
+    def test_assets_stay_in_project_root(self):
+        root = Path(__file__).resolve().parents[1]
+        self.assertEqual(Path(transcriber.ROOT_DIR), root)
+        for path in (self.original_output, transcriber.MODEL_PATH,
+                     transcriber.KEYWORDS_PATH, transcriber.CLI_PATH):
+            self.assertTrue(Path(path).is_absolute())
+            self.assertTrue(Path(path).is_relative_to(root))
+
+
+if __name__ == "__main__":
+    unittest.main()

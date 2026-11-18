@@ -12,12 +12,19 @@ On my GPU, transcription after recording runs at about **70× real time**. Speed
 
 The app records 16 kHz mono audio. Edit `keywords.txt` to add one custom term per line; Qwen3-ASR uses these as vocabulary hints and may still miss or alter a term. The model and recording are local files and are ignored by Git.
 
+Backend selection is automatic: on this NVIDIA setup, CUDA is preferred; without an available GPU, the CLI can select CPU. If the automatic attempt fails (for example, a game leaves too little VRAM to load the model), the app retries the same recording once with `--backend cpu`. It keeps the same model and vocabulary, logs the failed attempt, and reports an error if CPU also fails. This bounded retry applies to any CLI process failure, so a missing or corrupt model still fails after the retry. A missing executable is reported immediately.
+
+CPU transcription is slower and uses system RAM. The model is loaded for each transcription and released when the CLI exits; the next recording tries automatic selection again.
+
 ## Project layout
 
 ```text
 WhisperScribe/
-├── main.py                         # app entry point
-├── transcriber.py                  # recording and local ASR
+├── src/wisprflow/                  # all dictation app code
+│   ├── __init__.py
+│   ├── main.py                     # capsule UI and shortcut toggle
+│   └── transcriber.py              # recording, local ASR, CPU retry
+├── tests/                         # regression tests (unittest)
 ├── README.md
 ├── pyproject.toml                  # Python dependencies
 ├── uv.lock                         # locked Python dependency versions
@@ -32,7 +39,7 @@ WhisperScribe/
 └── .venv/                          # created by `uv sync` (ignored)
 ```
 
-`transcriber.py` expects the model and CLI at those exact paths. `src/wisprflow/` is leftover starter-package scaffolding; the Hyprland shortcut runs `main.py` directly.
+`src/wisprflow/transcriber.py` resolves the model, CLI, vocabulary, and recording relative to the project root, independent of the working directory. Keep this source checkout in place: `uv sync` installs it as an editable package and creates `.venv/bin/wisprflow` as the launcher.
 
 ## Requirements
 
@@ -52,7 +59,13 @@ From the project directory:
 uv sync
 ```
 
-This creates `.venv` and installs the locked Python dependencies. `main.py` uses Tkinter for the capsule, PyAudio for recording, and `pyperclip` to copy the transcript.
+This creates `.venv` and installs the locked Python dependencies. The app uses Tkinter for the capsule, PyAudio for recording, and `pyperclip` to copy the transcript. After completing the model and CLI setup below, launch it with:
+
+```bash
+uv run wisprflow
+```
+
+Each invocation toggles recording in the running app, or starts the app and records if it is not running yet.
 
 ## Get and compile transcribe.cpp
 
@@ -62,7 +75,7 @@ If `transcribe.cpp/` is not already present, clone the upstream project into thi
 git clone https://github.com/handy-computer/transcribe.cpp.git
 ```
 
-Build the CUDA CLI used by `main.py`:
+Build the CUDA CLI used by the app:
 
 ```bash
 cd transcribe.cpp
@@ -74,7 +87,7 @@ cmake --build build --target transcribe-cli -j"$(nproc)"
 cd ..
 ```
 
-For CPU-only, set `-DTRANSCRIBE_CUDA=OFF` (or omit the CUDA option) and build the same `transcribe-cli` target. The executable must end up at `transcribe.cpp/build/bin/transcribe-cli`, which is the path `main.py` calls.
+For CPU-only, set `-DTRANSCRIBE_CUDA=OFF` (or omit the CUDA option) and build the same `transcribe-cli` target. The executable must end up at `transcribe.cpp/build/bin/transcribe-cli`. The CUDA build also supports `--backend cpu`, so automatic CPU fallback does not need a second build or model download.
 
 ## Download the model
 
@@ -95,9 +108,11 @@ In `~/.config/hypr/hyprland.lua`, add a key binding. Replace `/path/to/WhisperSc
 
 ```lua
 hl.bind("SUPER + X", hl.dsp.exec_cmd(
-    "/path/to/WhisperScribe/.venv/bin/python /path/to/WhisperScribe/main.py"
+    "/path/to/WhisperScribe/.venv/bin/wisprflow"
 ))
 ```
+
+If upgrading from the old root-level `main.py`, run `uv sync` again and replace the old binding with the launcher above. Stop any old app process while it is idle so the next Win+X press loads the updated code. The key combination, capsule title, and toggle socket are unchanged.
 
 Also add this window rule so the capsule floats at the bottom center without taking focus:
 
@@ -126,8 +141,18 @@ Press **Win+X** once to start recording and again to stop and transcribe. Whispe
   /path/to/audio-16k-mono.wav
 ```
 
+Add `--backend cpu` to that command to test CPU inference directly.
+
 Convert audio to the required format with FFmpeg if needed:
 
 ```bash
 ffmpeg -i input.wav -ar 16000 -ac 1 /tmp/audio-16k-mono.wav
 ```
+
+## Run tests
+
+```bash
+uv run --locked python -m unittest discover -s tests -v
+```
+
+The tests use temporary recordings and sockets and mock inference; they do not open the microphone, load the model, change the clipboard, or send paste shortcuts. They cover WAV output, transcript parsing, GPU-to-CPU retry, failure reporting, project paths, and repeated-launch toggling.
