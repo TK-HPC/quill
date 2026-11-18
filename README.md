@@ -4,7 +4,9 @@
 
 I was inspired by Wispr Flow, but wanted dictation on **Arch Linux + Hyprland** using a local model. So I decided to try making my own with Qwen3-ASR running on my machine.
 
-I might later experiment with custom vocabulary and fine-tuning for my own voice. For now, it works well enough for me.
+The native Rust/GTK4 dashboard shows words dictated, estimated typing time saved, and searchable local history. It also edits custom vocabulary and the typing-speed baseline. No account or subscription.
+
+![Quill desktop dashboard](desktop/preview.png)
 
 **Win+X** starts recording; press it again to stop. The capsule hides immediately; after local transcription with [transcribe.cpp](https://github.com/handy-computer/transcribe.cpp), Quill copies the text and sends Ctrl+Shift+V to the active window. Custom vocabulary terms from `keywords.txt` are passed to Qwen3-ASR during inference.
 
@@ -23,7 +25,13 @@ Quill/
 ├── src/wisprflow/                  # all dictation app code
 │   ├── __init__.py
 │   ├── main.py                     # capsule UI and shortcut toggle
-│   └── transcriber.py              # recording, local ASR, CPU retry
+│   ├── transcriber.py              # recording, local ASR, CPU retry
+│   └── history.py                  # private local SQLite history
+├── desktop/                       # native Rust/GTK4 dashboard
+│   ├── src/                       # pages, history reads, preferences
+│   ├── assets/                    # bundled fonts, icons, and licenses
+│   ├── style.css                  # cream/black theme and readable type
+│   └── Cargo.toml
 ├── tests/                         # regression tests (unittest)
 ├── README.md
 ├── pyproject.toml                  # Python dependencies
@@ -66,6 +74,62 @@ uv run quill
 ```
 
 Each invocation toggles recording in the running app, or starts the app and records if it is not running yet.
+
+## Open the desktop dashboard
+
+Install the native build dependencies (GTK ≥ 4.12 and Pango ≥ 1.56):
+
+```bash
+sudo pacman -S --needed rust gtk4 pango sqlite pkgconf
+cargo build --locked --release --manifest-path desktop/Cargo.toml
+./desktop/target/release/quill-desktop
+```
+
+For development, use `cargo run --locked --manifest-path desktop/Cargo.toml`. The dashboard and recording capsule are separate: closing the dashboard leaves Win+X working. Opening it again brings the existing dashboard forward. Drag the Quill wordmark to move the window; use the compositor's resize controls to resize it.
+
+Keep the checkout in place: the dashboard locates fonts, icons, and `keywords.txt` relative to its compile-time source directory. Rebuild after moving the checkout. Fonts and icons are bundled, so the interface needs no network connection.
+
+To add Quill to your application menu, run this from the project root after the release build:
+
+```bash
+mkdir -p ~/.local/share/applications
+cat > ~/.local/share/applications/io.github.tk_hpc.Quill.desktop <<EOF
+[Desktop Entry]
+Type=Application
+Name=Quill
+Comment=Local dictation and history
+Exec="$PWD/desktop/target/release/quill-desktop"
+Icon=$PWD/desktop/assets/brand/quill-mark.png
+Terminal=false
+Categories=Utility;Accessibility;
+StartupNotify=true
+EOF
+```
+
+For square dashboard corners in Hyprland, add this alongside the capsule rule:
+
+```lua
+hl.window_rule({
+    name = "quill-dashboard",
+    match = { class = "^io.github.tk_hpc.Quill$" },
+    rounding = 0,
+})
+```
+
+## History, statistics, and vocabulary
+
+- **Home** shows words you did not type, estimated time saved, dictation count, and the five most recent entries. It refreshes every two seconds while open. Monospaced counters count up on each Home click, and pages crossfade between destinations. A 1.4-second rainbow ribbon spray comes inward from both sides when Home opens. All motion respects GTK’s animation preference.
+- **History** is a read-only list of transcripts with search and a Copy control. Rows omit dates and recording metadata. It loads 50 entries at a time. Search treats punctuation literally; case-insensitive matching covers ASCII, while other scripts match their original case.
+- **Dictionary** edits the same `keywords.txt` used by the recording engine. Save applies to the next transcription. Unsaved changes are guarded on reload/close, and external file changes cause a conflict instead of being overwritten.
+- **Settings** saves a typing baseline of 10–200 words per minute, initially 40. Estimated seconds saved are `max(0, words × 60 / typing WPM − recording seconds)`. This estimate excludes inference latency and correction time.
+
+History begins with new successful transcriptions after updating/restarting the recorder. Existing recordings are not imported. Word counts recognize Unicode word groups and contractions; languages without word separators, including Thai and Chinese, do not receive linguistic word segmentation.
+
+Transcripts are stored in `$XDG_DATA_HOME/quill/history.sqlite3`, defaulting to `~/.local/share/quill/history.sqlite3`. The directory is owner-only and the database is owner-readable/writable. History is local plaintext, not encrypted. Settings live in `$XDG_CONFIG_HOME/quill/preferences.ini`, defaulting to `~/.config/quill/preferences.ini`. Relative XDG paths use the default locations. The existing recorder also overwrites `1.wav` with the latest recording and prints transcribed text to its process output.
+
+A history write failure is logged without dropping the transcript or preventing paste. A dashboard read failure displays an error instead of false zero totals. Neither dashboard use nor transcription sends audio or history to a server.
+
+The interface uses bundled [DM Sans, DM Mono, and Newsreader](desktop/assets/fonts/SOURCES.md) under the SIL Open Font License and [Hugeicons Free Stroke Rounded](desktop/assets/icons/SOURCES.md) under MIT. Font/icon sources, modifications, and licenses are included beside the assets.
 
 ## Get and compile transcribe.cpp
 
@@ -153,6 +217,11 @@ ffmpeg -i input.wav -ar 16000 -ac 1 /tmp/audio-16k-mono.wav
 
 ```bash
 uv run --locked python -m unittest discover -s tests -v
+cargo test --locked --manifest-path desktop/Cargo.toml
+cargo clippy --locked --manifest-path desktop/Cargo.toml --all-targets -- -D warnings
+cargo fmt --manifest-path desktop/Cargo.toml --check
+uvx ruff check --ignore E712 src tests
+uvx ty check src
 ```
 
-The tests use temporary recordings and sockets and mock inference; they do not open the microphone, load the model, change the clipboard, or send paste shortcuts. They cover WAV output, transcript parsing, GPU-to-CPU retry, failure reporting, project paths, and repeated-launch toggling.
+The tests use temporary recordings, databases, preferences, and sockets and mock inference; they do not open the microphone, load the model, change the clipboard, or send paste shortcuts. They cover WAV output, CPU retry, history persistence and failures, search/statistics, counter interpolation, vocabulary conflicts, preference validation, and repeated-launch toggling. Explicit boolean comparisons are intentional for readability, so Ruff E712 and the equivalent Clippy lint are excluded.

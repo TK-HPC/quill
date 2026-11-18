@@ -7,6 +7,8 @@ import wave
 import numpy as np
 import pyaudio
 
+from .history import record_dictation
+
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
 OUTPUT_PATH = os.path.join(ROOT_DIR, "1.wav")
 MODEL_PATH = os.path.join(ROOT_DIR, "model/Qwen3-ASR-1.7B-Q4_K_M.gguf")
@@ -36,7 +38,16 @@ class Transcriber:
     def _run(self):
         try:
             frames = self._record()
-            self.transcript = self._transcribe(frames)
+            transcript = self._transcribe(frames)
+            try:
+                recorded_bytes = 0
+                for frame in frames:
+                    recorded_bytes += len(frame)
+                duration_seconds = recorded_bytes / (RATE * 2)
+                record_dictation(transcript, duration_seconds)
+            except Exception as error:  # noqa: BLE001 - storage must not interrupt dictation
+                print(f"Quill: could not save dictation history: {error}", file=sys.stderr, flush=True)
+            self.transcript = transcript
         except Exception as error:  # noqa: BLE001 - report worker failures to the capsule
             self.error = error
 

@@ -15,3 +15,6 @@ model/
 
 # External transcribe.cpp checkout and build artifacts
 transcribe.cpp/
+
+# Rust desktop build output
+desktop/target/

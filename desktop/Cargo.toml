@@ -1,0 +1,17 @@
+[package]
+name = "quill-desktop"
+version = "0.1.0"
+edition = "2024"
+description = "Quill's native local dictation dashboard"
+
+[dependencies]
+gtk = { package = "gtk4", version = "0.11.5", features = ["v4_12"] }
+rusqlite = "0.43.0"
+pango = { version = "0.22.9", features = ["v1_56"] }
+
+[lints.clippy]
+bool_comparison = "allow"
+needless_bool = "allow"
+
+[profile.dev]
+debug = 0

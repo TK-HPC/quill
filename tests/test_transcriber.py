@@ -1,7 +1,10 @@
+import os
+import sqlite3
 import subprocess
 import tempfile
 import unittest
 import wave
+from contextlib import closing
 from pathlib import Path
 from unittest.mock import patch
 
@@ -17,6 +20,9 @@ class TranscriberTests(unittest.TestCase):
         output_patch = patch.object(transcriber, "OUTPUT_PATH", self.output)
         output_patch.start()
         self.addCleanup(output_patch.stop)
+        environment_patch = patch.dict(os.environ, {"XDG_DATA_HOME": self.directory.name})
+        environment_patch.start()
+        self.addCleanup(environment_patch.stop)
 
     @patch.object(transcriber.subprocess, "run")
     def test_writes_pcm_and_returns_transcript(self, run):
@@ -52,10 +58,64 @@ class TranscriberTests(unittest.TestCase):
         with (
             patch.object(recorder, "_record", return_value=[]),
             patch.object(recorder, "_transcribe", side_effect=error),
+            patch.object(transcriber, "record_dictation") as save_history,
         ):
             recorder._run()
         self.assertIs(recorder.error, error)
         self.assertIsNone(recorder.transcript)
+        save_history.assert_not_called()
+
+    def test_history_failure_still_publishes_transcript(self):
+        recorder = transcriber.Transcriber()
+        with (
+            patch.object(recorder, "_record", return_value=[bytes(32000)]),
+            patch.object(recorder, "_transcribe", return_value="hello world"),
+            patch.object(transcriber, "record_dictation", side_effect=OSError("disk full")),
+            patch("sys.stderr") as stderr,
+        ):
+            recorder._run()
+        self.assertEqual(recorder.transcript, "hello world")
+        self.assertIsNone(recorder.error)
+        self.assertIn("disk full", "".join(call.args[0] for call in stderr.write.call_args_list))
+
+    def test_worker_saves_actual_pcm_duration_before_publishing(self):
+        recorder = transcriber.Transcriber()
+
+        def check_history(text, duration_seconds):
+            self.assertIsNone(recorder.transcript)
+            self.assertEqual(text, "hello world")
+            self.assertEqual(duration_seconds, 1.5)
+
+        with (
+            patch.object(recorder, "_record", return_value=[bytes(32000), bytes(16000)]),
+            patch.object(recorder, "_transcribe", return_value="hello world"),
+            patch.object(transcriber, "record_dictation", side_effect=check_history) as save_history,
+        ):
+            recorder._run()
+        save_history.assert_called_once()
+        self.assertEqual(recorder.transcript, "hello world")
+        self.assertIsNone(recorder.error)
+
+    @patch.object(transcriber.subprocess, "run")
+    def test_cpu_fallback_records_only_one_history_row(self, run):
+        recorder = transcriber.Transcriber()
+        run.side_effect = [
+            subprocess.CalledProcessError(1, [], stderr="CUDA out of memory"),
+            subprocess.CompletedProcess([], 0, "text: CPU transcript\n"),
+        ]
+        with (
+            patch.object(recorder, "_record", return_value=[bytes(32000)]),
+            patch("sys.stderr"),
+        ):
+            recorder._run()
+        self.assertEqual(recorder.transcript, "CPU transcript")
+        self.assertIsNone(recorder.error)
+        database_path = Path(self.directory.name) / "quill/history.sqlite3"
+        with closing(sqlite3.connect(database_path)) as connection:
+            self.assertEqual(
+                connection.execute("SELECT text, word_count, duration_seconds FROM dictations").fetchall(),
+                [("CPU transcript", 2, 1.0)],
+            )
 
     @patch.object(transcriber.subprocess, "run")
     def test_gpu_failure_retries_same_recording_on_cpu(self, run):
