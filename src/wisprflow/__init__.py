@@ -1,1 +1,1 @@
-"""WhisperScribe local dictation app."""
+"""Quill local dictation app."""

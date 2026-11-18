@@ -1,12 +1,12 @@
-# WhisperScribe
+# Quill
 
-> **Unofficial personal project.** WhisperScribe is homemade and independent. It is not affiliated with, endorsed by, or sponsored by Wispr Flow or its owners. “Wispr Flow” is a trademark of its respective owner.
+> **Unofficial personal project.** Quill is homemade and independent. It is not affiliated with, endorsed by, or sponsored by Wispr Flow or its owners. “Wispr Flow” is a trademark of its respective owner.
 
 I was inspired by Wispr Flow, but wanted dictation on **Arch Linux + Hyprland** using a local model. So I decided to try making my own with Qwen3-ASR running on my machine.
 
 I might later experiment with custom vocabulary and fine-tuning for my own voice. For now, it works well enough for me.
 
-**Win+X** starts recording; press it again to stop. The capsule hides immediately; after local transcription with [transcribe.cpp](https://github.com/handy-computer/transcribe.cpp), WhisperScribe copies the text and sends Ctrl+Shift+V to the active window. Custom vocabulary terms from `keywords.txt` are passed to Qwen3-ASR during inference.
+**Win+X** starts recording; press it again to stop. The capsule hides immediately; after local transcription with [transcribe.cpp](https://github.com/handy-computer/transcribe.cpp), Quill copies the text and sends Ctrl+Shift+V to the active window. Custom vocabulary terms from `keywords.txt` are passed to Qwen3-ASR during inference.
 
 On my GPU, transcription after recording runs at about **70× real time**. Speed varies with the GPU, model, and audio.
 
@@ -19,7 +19,7 @@ CPU transcription is slower and uses system RAM. The model is loaded for each tr
 ## Project layout
 
 ```text
-WhisperScribe/
+Quill/
 ├── src/wisprflow/                  # all dictation app code
 │   ├── __init__.py
 │   ├── main.py                     # capsule UI and shortcut toggle
@@ -39,7 +39,7 @@ WhisperScribe/
 └── .venv/                          # created by `uv sync` (ignored)
 ```
 
-`src/wisprflow/transcriber.py` resolves the model, CLI, vocabulary, and recording relative to the project root, independent of the working directory. Keep this source checkout in place: `uv sync` installs it as an editable package and creates `.venv/bin/wisprflow` as the launcher.
+`src/wisprflow/transcriber.py` resolves the model, CLI, vocabulary, and recording relative to the project root, independent of the working directory. Keep this source checkout in place: `uv sync` installs it as an editable package and creates `.venv/bin/quill` as the launcher. The internal package and toggle socket keep their `wisprflow` names, and the `wisprflow` command remains an alias for existing shortcuts.
 
 ## Requirements
 
@@ -62,7 +62,7 @@ uv sync
 This creates `.venv` and installs the locked Python dependencies. The app uses Tkinter for the capsule, PyAudio for recording, and `pyperclip` to copy the transcript. After completing the model and CLI setup below, launch it with:
 
 ```bash
-uv run wisprflow
+uv run quill
 ```
 
 Each invocation toggles recording in the running app, or starts the app and records if it is not running yet.
@@ -104,22 +104,22 @@ The model is hosted in the [`handy-computer/Qwen3-ASR-1.7B-gguf`](https://huggin
 
 ## Add the shortcut and capsule to Hyprland
 
-In `~/.config/hypr/hyprland.lua`, add a key binding. Replace `/path/to/WhisperScribe` with this project's directory:
+In `~/.config/hypr/hyprland.lua`, add a key binding. Replace `/path/to/Quill` with this project's directory:
 
 ```lua
 hl.bind("SUPER + X", hl.dsp.exec_cmd(
-    "/path/to/WhisperScribe/.venv/bin/wisprflow"
+    "/path/to/Quill/.venv/bin/quill"
 ))
 ```
 
-If upgrading from the old root-level `main.py`, run `uv sync` again and replace the old binding with the launcher above. Stop any old app process while it is idle so the next Win+X press loads the updated code. The key combination, capsule title, and toggle socket are unchanged.
+If upgrading from WhisperScribe, run `uv sync` again and update the binding and window rule below. Stop any old app process while it is idle so the next Win+X press loads the updated code. The key combination and toggle socket are unchanged; the capsule title is now `Quill Capsule`.
 
 Also add this window rule so the capsule floats at the bottom center without taking focus:
 
 ```lua
 hl.window_rule({
-    name  = "whisperscribe-capsule",
-    match = { title = "^WhisperScribe Capsule$" },
+    name  = "quill-capsule",
+    match = { title = "^Quill Capsule$" },
     float = true,
     no_focus = true,
     no_blur = true,
@@ -133,7 +133,7 @@ Reload Hyprland:
 hyprctl reload
 ```
 
-Press **Win+X** once to start recording and again to stop and transcribe. WhisperScribe copies the transcript and sends Ctrl+Shift+V to the active window when transcription finishes. The CLI can also transcribe a 16 kHz mono WAV directly:
+Press **Win+X** once to start recording and again to stop and transcribe. Quill copies the transcript and sends Ctrl+Shift+V to the active window when transcription finishes. The CLI can also transcribe a 16 kHz mono WAV directly:
 
 ```bash
 ./transcribe.cpp/build/bin/transcribe-cli \

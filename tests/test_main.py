@@ -32,7 +32,7 @@ class ShortcutTests(unittest.TestCase):
                 self.assertFalse(main.toggle_running_app())
 
     def test_launcher_works_outside_project_directory(self):
-        launcher = Path(sys.executable).parent / "wisprflow"
+        launcher = Path(sys.executable).parent / "quill"
         with tempfile.TemporaryDirectory() as directory:
             address = str(Path(directory) / "app.sock")
             with socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM) as server:

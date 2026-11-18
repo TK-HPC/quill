@@ -82,12 +82,12 @@ class Transcriber:
                 break
             except subprocess.CalledProcessError as error:
                 print(
-                    f"WhisperScribe: {backend} transcription failed:\n{error.stderr or error}",
+                    f"Quill: {backend} transcription failed:\n{error.stderr or error}",
                     file=sys.stderr, flush=True,
                 )
                 if backend == "cpu":
                     raise
-                print("WhisperScribe: retrying on CPU.", file=sys.stderr, flush=True)
+                print("Quill: retrying on CPU.", file=sys.stderr, flush=True)
         for line in result.stdout.splitlines():
             if line.startswith("text: "):
                 return line.removeprefix("text: ").strip()

@@ -1,7 +1,7 @@
 [project]
 name = "wisprflow"
 version = "0.1.0"
-description = "Add your description here"
+description = "Quill: local voice dictation for Linux and Hyprland"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
@@ -13,6 +13,7 @@ dependencies = [
 ]
 
 [project.scripts]
+quill = "wisprflow.main:main"
 wisprflow = "wisprflow.main:main"
 
 [build-system]

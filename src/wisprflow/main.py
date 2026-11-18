@@ -18,7 +18,7 @@ HEIGHT = 46
 class Capsule:
     def __init__(self):
         self.root = tk.Tk()
-        self.root.title("WhisperScribe Capsule")
+        self.root.title("Quill Capsule")
         self.root.overrideredirect(True)
         self.root.attributes("-topmost", True)
         self.root.configure(bg="#050607")
@@ -103,7 +103,7 @@ class Capsule:
     def _tick(self):
         self.level = self.transcriber.level
         if self.transcriber.error:
-            print(f"WhisperScribe: {self.transcriber.error}", flush=True)
+            print(f"Quill: {self.transcriber.error}", flush=True)
             self.transcriber.error = None
             self._hide()
         elif self.transcriber.transcript is not None:
