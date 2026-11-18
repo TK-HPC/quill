@@ -18,7 +18,7 @@ A Linux user moving between coding, writing, messaging, and games. Check progres
 
 ## Information architecture
 
-Home: shortcut guidance, real totals, recent dictations. History: search and copy stored transcripts. Dictionary: edit the vocabulary already consumed by the model. Settings: typing-speed estimate and local setup details. These four working destinations are the current scope.
+Home: shortcut guidance, real totals, recent dictations. History: search and copy stored transcripts. Dictionary: edit the vocabulary already consumed by the model. Settings: dictation language, typing-speed estimate, and local setup details. Language defaults to English; the optional automatic choice and typing baseline share the same local preferences file with the recorder. These four working destinations are the current scope.
 
 ## Design principles
 

@@ -20,7 +20,10 @@ class TranscriberTests(unittest.TestCase):
         output_patch = patch.object(transcriber, "OUTPUT_PATH", self.output)
         output_patch.start()
         self.addCleanup(output_patch.stop)
-        environment_patch = patch.dict(os.environ, {"XDG_DATA_HOME": self.directory.name})
+        environment_patch = patch.dict(os.environ, {
+            "XDG_DATA_HOME": self.directory.name,
+            "XDG_CONFIG_HOME": self.directory.name,
+        })
         environment_patch.start()
         self.addCleanup(environment_patch.stop)
 
@@ -42,8 +45,24 @@ class TranscriberTests(unittest.TestCase):
         self.assertEqual(command[command.index("-m") + 1], transcriber.MODEL_PATH)
         self.assertEqual(command[command.index("--vocabulary-file") + 1], transcriber.KEYWORDS_PATH)
         self.assertIn(self.output, command)
+        self.assertEqual(command[command.index("--language") + 1], "en")
         self.assertEqual(command[-2:], ["--backend", "auto"])
         self.assertEqual(run.call_args.kwargs, {"capture_output": True, "text": True, "check": True})
+
+    @patch.object(transcriber.subprocess, "run")
+    def test_language_changes_are_read_for_each_transcription(self, run):
+        run.return_value = subprocess.CompletedProcess([], 0, "text: hello\n")
+        transcriber.Transcriber._transcribe([])
+        self.assertIn("--language", run.call_args.args[0])
+        preferences = Path(self.directory.name) / "quill/preferences.ini"
+        preferences.parent.mkdir()
+        preferences.write_text("[Transcription]\nlanguage=auto\n")
+        transcriber.Transcriber._transcribe([])
+        self.assertNotIn("--language", run.call_args.args[0])
+        preferences.write_text("[Transcription]\nlanguage=en\n")
+        transcriber.Transcriber._transcribe([])
+        command = run.call_args.args[0]
+        self.assertEqual(command[command.index("--language") + 1], "en")
 
     @patch.object(transcriber.subprocess, "run")
     def test_missing_transcript_is_an_error(self, run):
@@ -131,6 +150,7 @@ class TranscriberTests(unittest.TestCase):
                 self.assertEqual(run.call_count, 2)
                 automatic, cpu = [call.args[0] for call in run.call_args_list]
                 self.assertEqual(cpu, [*automatic[:-1], "cpu"])
+                self.assertEqual(cpu[cpu.index("--language") + 1], "en")
                 self.assertIn(message, "".join(call.args[0] for call in stderr.write.call_args_list))
 
     @patch.object(transcriber.subprocess, "run")

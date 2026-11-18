@@ -7,7 +7,7 @@ use dashboard::DashboardWidgets;
 use gtk::prelude::*;
 use gtk::{Application, ApplicationWindow, Orientation, gdk, gio, glib};
 use pango::prelude::FontMapExt;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::path::Path;
 use std::rc::Rc;
 
@@ -443,6 +443,7 @@ fn build_settings(widgets: &DashboardWidgets) -> gtk::Box {
     let page = page_container();
     page.append(&text_label("Settings", "page-title"));
     page.append(&text_label("A small app. Your own setup.", "body-copy"));
+    page.append(&language_setting());
     let speed_row = gtk::Box::new(Orientation::Vertical, 12);
     speed_row.add_css_class("setting-row");
     speed_row.append(&text_label("Your typing speed", "section-title"));
@@ -486,4 +487,49 @@ fn build_settings(widgets: &DashboardWidgets) -> gtk::Box {
         "caption",
     ));
     page
+}
+
+fn language_setting() -> gtk::Box {
+    let row = gtk::Box::new(Orientation::Vertical, 12);
+    row.add_css_class("setting-row");
+    row.append(&text_label("Dictation language", "section-title"));
+    row.append(&text_label(
+        "Choose the language you speak. Changes apply to your next dictation.",
+        "body-copy",
+    ));
+    let language = gtk::DropDown::from_strings(&["English", "Detect automatically"]);
+    language.set_halign(gtk::Align::Start);
+    language.update_property(&[gtk::accessible::Property::Label("Dictation language")]);
+    let status = text_label("", "caption");
+    match preferences::load_language() {
+        Ok(value) => {
+            if value == "auto" {
+                language.set_selected(1);
+            } else {
+                language.set_selected(0);
+            }
+        }
+        Err(error) => status.set_text(&format!("{error} The recorder will use English.")),
+    }
+    row.append(&language);
+    row.append(&status);
+    let saved_selection = Cell::new(language.selected());
+    language.connect_selected_notify(move |selection| {
+        let index = selection.selected();
+        if index == saved_selection.get() {
+            return;
+        }
+        let value = if index == 0 { "en" } else { "auto" };
+        match preferences::save_language(value) {
+            Ok(()) => {
+                saved_selection.set(index);
+                status.set_text("Saved. Applies to your next dictation.");
+            }
+            Err(error) => {
+                status.set_text(&error);
+                selection.set_selected(saved_selection.get());
+            }
+        }
+    });
+    row
 }

@@ -12,6 +12,7 @@ pango = { version = "0.22.9", features = ["v1_56"] }
 [lints.clippy]
 bool_comparison = "allow"
 needless_bool = "allow"
+question_mark = "allow"
 
 [profile.dev]
 debug = 0

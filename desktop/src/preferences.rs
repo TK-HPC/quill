@@ -102,29 +102,12 @@ pub fn load_typing_speed() -> Result<u32, String> {
 }
 
 fn load_typing_speed_at(path: &Path) -> Result<u32, String> {
-    let file = gio::File::for_path(path);
-    let contents = match file.load_contents(gio::Cancellable::NONE) {
-        Ok((contents, _)) => contents,
-        Err(error) => {
-            if error.matches(gio::IOErrorEnum::NotFound) == true {
-                return Ok(40);
-            } else {
-                return Err(format!("Cannot read Quill preferences: {error}"));
-            }
-        }
+    let preferences = match load_preferences_at(path) {
+        Ok((preferences, _)) => preferences,
+        Err(error) => return Err(error),
     };
-    let text = match std::str::from_utf8(&contents) {
-        Ok(text) => text,
-        Err(error) => {
-            return Err(format!(
-                "Quill preferences must contain UTF-8 text: {error}"
-            ));
-        }
-    };
-    let preferences = glib::KeyFile::new();
-    match preferences.load_from_data(text, glib::KeyFileFlags::NONE) {
-        Ok(()) => {}
-        Err(error) => return Err(format!("Cannot parse Quill preferences: {error}")),
+    if preferences.has_group("Statistics") == false {
+        return Ok(40);
     }
     match preferences.integer("Statistics", "typing_words_per_minute") {
         Ok(speed) => {
@@ -138,6 +121,89 @@ fn load_typing_speed_at(path: &Path) -> Result<u32, String> {
     }
 }
 
+fn load_preferences_at(path: &Path) -> Result<(glib::KeyFile, Option<String>), String> {
+    let file = gio::File::for_path(path);
+    let (contents, etag) = match file.load_contents(gio::Cancellable::NONE) {
+        Ok(result) => result,
+        Err(error) => {
+            if error.matches(gio::IOErrorEnum::NotFound) == true {
+                return Ok((glib::KeyFile::new(), None));
+            } else {
+                return Err(format!("Cannot read Quill preferences: {error}"));
+            }
+        }
+    };
+    let text = match std::str::from_utf8(&contents) {
+        Ok(text) => text,
+        Err(error) => {
+            return Err(format!(
+                "Quill preferences must contain UTF-8 text: {error}"
+            ));
+        }
+    };
+    if text.trim().is_empty() == true {
+        return Err("Quill preferences are empty.".to_string());
+    }
+    let preferences = glib::KeyFile::new();
+    match preferences.load_from_data(text, glib::KeyFileFlags::KEEP_COMMENTS) {
+        Ok(()) => Ok((preferences, etag.map(|value| value.to_string()))),
+        Err(error) => Err(format!("Cannot parse Quill preferences: {error}")),
+    }
+}
+
+pub fn load_language() -> Result<String, String> {
+    match preferences_path() {
+        Ok(path) => load_language_at(&path),
+        Err(error) => Err(error),
+    }
+}
+
+fn load_language_at(path: &Path) -> Result<String, String> {
+    let preferences = match load_preferences_at(path) {
+        Ok((preferences, _)) => preferences,
+        Err(error) => return Err(error),
+    };
+    if preferences.has_group("Transcription") == false {
+        return Ok("en".to_string());
+    }
+    match preferences.string("Transcription", "language") {
+        Ok(language) => {
+            let language = language.trim();
+            if language == "en" || language == "auto" {
+                Ok(language.to_string())
+            } else {
+                Err("Transcription language must be en or auto.".to_string())
+            }
+        }
+        Err(error) => {
+            if error.matches(glib::KeyFileError::KeyNotFound) == true {
+                Ok("en".to_string())
+            } else {
+                Err(format!("Cannot read transcription language: {error}"))
+            }
+        }
+    }
+}
+
+pub fn save_language(language: &str) -> Result<(), String> {
+    match preferences_path() {
+        Ok(path) => save_language_at(&path, language),
+        Err(error) => Err(error),
+    }
+}
+
+fn save_language_at(path: &Path, language: &str) -> Result<(), String> {
+    if language != "en" && language != "auto" {
+        return Err("Transcription language must be en or auto.".to_string());
+    }
+    let (preferences, etag) = match load_preferences_at(path) {
+        Ok(result) => result,
+        Err(error) => return Err(error),
+    };
+    preferences.set_string("Transcription", "language", language);
+    save_preferences_at(path, &preferences, etag.as_deref())
+}
+
 pub fn save_typing_speed(words_per_minute: u32) -> Result<(), String> {
     match preferences_path() {
         Ok(path) => save_typing_speed_at(&path, words_per_minute),
@@ -149,6 +215,23 @@ fn save_typing_speed_at(path: &Path, words_per_minute: u32) -> Result<(), String
     if (10..=200).contains(&words_per_minute) == false {
         return Err("Typing speed must be between 10 and 200 words per minute.".to_string());
     }
+    let (preferences, etag) = match load_preferences_at(path) {
+        Ok(result) => result,
+        Err(error) => return Err(error),
+    };
+    preferences.set_integer(
+        "Statistics",
+        "typing_words_per_minute",
+        words_per_minute as i32,
+    );
+    save_preferences_at(path, &preferences, etag.as_deref())
+}
+
+fn save_preferences_at(
+    path: &Path,
+    preferences: &glib::KeyFile,
+    expected_etag: Option<&str>,
+) -> Result<(), String> {
     let directory = match path.parent() {
         Some(directory) => directory,
         None => return Err("Cannot locate the Quill preferences directory.".to_string()),
@@ -161,22 +244,22 @@ fn save_typing_speed_at(path: &Path, words_per_minute: u32) -> Result<(), String
             ));
         }
     }
-    let preferences = glib::KeyFile::new();
-    preferences.set_integer(
-        "Statistics",
-        "typing_words_per_minute",
-        words_per_minute as i32,
-    );
     let file = gio::File::for_path(path);
     match file.replace_contents(
         preferences.to_data().as_bytes(),
-        None,
+        expected_etag,
         false,
         gio::FileCreateFlags::PRIVATE,
         gio::Cancellable::NONE,
     ) {
         Ok(_) => Ok(()),
-        Err(error) => Err(format!("Cannot save Quill preferences: {error}")),
+        Err(error) => {
+            if error.matches(gio::IOErrorEnum::WrongEtag) == true {
+                Err("Preferences changed outside Quill. Try saving again.".to_string())
+            } else {
+                Err(format!("Cannot save Quill preferences: {error}"))
+            }
+        }
     }
 }
 
@@ -233,6 +316,60 @@ mod tests {
             save_typing_speed_at(&path, speed).unwrap();
             assert_eq!(load_typing_speed_at(&path).unwrap(), speed);
         }
+    }
+
+    #[test]
+    fn language_and_typing_speed_preserve_each_other_and_unrelated_keys() {
+        let directory = TestDirectory::new();
+        let path = directory.path.join("preferences.ini");
+        assert_eq!(load_language_at(&path).unwrap(), "en");
+        save_language_at(&path, "auto").unwrap();
+        assert_eq!(load_typing_speed_at(&path).unwrap(), 40);
+        std::fs::write(&path, "# Keep this comment\n[Statistics]\ntyping_words_per_minute=100\n\n[Other]\nvalue=keep\n").unwrap();
+        assert_eq!(load_language_at(&path).unwrap(), "en");
+        save_language_at(&path, "en").unwrap();
+        assert_eq!(load_typing_speed_at(&path).unwrap(), 100);
+        save_typing_speed_at(&path, 80).unwrap();
+        assert_eq!(load_language_at(&path).unwrap(), "en");
+        save_language_at(&path, "auto").unwrap();
+        assert_eq!(load_language_at(&path).unwrap(), "auto");
+        assert_eq!(load_typing_speed_at(&path).unwrap(), 80);
+        let contents = std::fs::read_to_string(&path).unwrap();
+        assert!(contents.contains("# Keep this comment") == true);
+        assert!(contents.contains("value=keep") == true);
+    }
+
+    #[test]
+    fn invalid_language_and_malformed_files_are_not_overwritten() {
+        let directory = TestDirectory::new();
+        let path = directory.path.join("preferences.ini");
+        save_language_at(&path, "en").unwrap();
+        for language in ["", "unknown", "English"] {
+            assert!(save_language_at(&path, language).is_err() == true);
+            assert_eq!(load_language_at(&path).unwrap(), "en");
+        }
+        std::fs::write(&path, "[Transcription]\nlanguage=unknown\n").unwrap();
+        assert!(load_language_at(&path).is_err() == true);
+        for contents in ["", "not ini"] {
+            std::fs::write(&path, contents).unwrap();
+            assert!(save_language_at(&path, "en").is_err() == true);
+            assert!(save_typing_speed_at(&path, 80).is_err() == true);
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), contents);
+        }
+    }
+
+    #[test]
+    fn preferences_reject_concurrent_external_changes() {
+        let directory = TestDirectory::new();
+        let path = directory.path.join("preferences.ini");
+        save_language_at(&path, "en").unwrap();
+        let (preferences, etag) = load_preferences_at(&path).unwrap();
+        preferences.set_string("Transcription", "language", "auto");
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        let external = "[Transcription]\nlanguage=en\n# External edit\n";
+        std::fs::write(&path, external).unwrap();
+        assert!(save_preferences_at(&path, &preferences, etag.as_deref()).is_err() == true);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), external);
     }
 
     #[test]

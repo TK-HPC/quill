@@ -26,6 +26,7 @@ Quill/
 │   ├── __init__.py
 │   ├── main.py                     # capsule UI and shortcut toggle
 │   ├── transcriber.py              # recording, local ASR, CPU retry
+│   ├── preferences.py              # reads the shared dictation language
 │   └── history.py                  # private local SQLite history
 ├── desktop/                       # native Rust/GTK4 dashboard
 │   ├── src/                       # pages, history reads, preferences
@@ -121,7 +122,21 @@ hl.window_rule({
 - **Home** shows words you did not type, estimated time saved, dictation count, and the five most recent entries. It refreshes every two seconds while open. Monospaced counters count up on each Home click, and pages crossfade between destinations. A 1.4-second rainbow ribbon spray comes inward from both sides when Home opens. All motion respects GTK’s animation preference.
 - **History** is a read-only list of transcripts with search and a Copy control. Rows omit dates and recording metadata. It loads 50 entries at a time. Search treats punctuation literally; case-insensitive matching covers ASCII, while other scripts match their original case.
 - **Dictionary** edits the same `keywords.txt` used by the recording engine. Save applies to the next transcription. Unsaved changes are guarded on reload/close, and external file changes cause a conflict instead of being overwritten.
-- **Settings** saves a typing baseline of 10–200 words per minute, initially 40. Estimated seconds saved are `max(0, words × 60 / typing WPM − recording seconds)`. This estimate excludes inference latency and correction time.
+- **Settings** saves your dictation language and a typing baseline of 10–200 words per minute, initially 40. Estimated seconds saved are `max(0, words × 60 / typing WPM − recording seconds)`. This estimate excludes inference latency and correction time.
+
+Dictation defaults to **English**. Settings → Dictation language writes the same local `preferences.ini` that the recorder reads before every transcription. English passes `--language en` on both the automatic and CPU attempts. **Detect automatically** restores the model's language detection. This selects the spoken language; it is not a translation feature, and vocabulary hints can still contain names from other languages. See the upstream [Qwen3-ASR language-prefix implementation](https://github.com/handy-computer/transcribe.cpp/blob/main/docs/porting/families/qwen3_asr.md).
+
+You can also edit the file directly:
+
+```ini
+[Statistics]
+typing_words_per_minute=40
+
+[Transcription]
+language=en
+```
+
+Supported language values are `en` and `auto`. The dashboard reads preferences when it opens; the recorder rereads them for every transcription, so saving a change needs no recorder restart. Missing language settings default to English. If the file is unreadable or the language value is invalid, the recorder logs the problem and uses English. The dashboard reports malformed files without overwriting them. Saving either setting preserves the other settings and comments.
 
 History begins with new successful transcriptions after updating/restarting the recorder. Existing recordings are not imported. Word counts recognize Unicode word groups and contractions; languages without word separators, including Thai and Chinese, do not receive linguistic word segmentation.
 
@@ -224,4 +239,4 @@ uvx ruff check --ignore E712 src tests
 uvx ty check src
 ```
 
-The tests use temporary recordings, databases, preferences, and sockets and mock inference; they do not open the microphone, load the model, change the clipboard, or send paste shortcuts. They cover WAV output, CPU retry, history persistence and failures, search/statistics, counter interpolation, vocabulary conflicts, preference validation, and repeated-launch toggling. Explicit boolean comparisons are intentional for readability, so Ruff E712 and the equivalent Clippy lint are excluded.
+The tests use temporary recordings, databases, preferences, and sockets and mock inference; they do not open the microphone, load the model, change the clipboard, or send paste shortcuts. They cover WAV output, CPU retry, language reloads, history persistence and failures, search/statistics, counter interpolation, vocabulary conflicts, preference preservation/validation, and repeated-launch toggling. Explicit boolean comparisons and error-handling branches are intentional for readability; the corresponding shorthand-style Ruff/Clippy lints are excluded.

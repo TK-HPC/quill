@@ -8,6 +8,7 @@ import numpy as np
 import pyaudio
 
 from .history import record_dictation
+from .preferences import load_language
 
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
 OUTPUT_PATH = os.path.join(ROOT_DIR, "1.wav")
@@ -82,6 +83,9 @@ class Transcriber:
             output.writeframes(b"".join(frames))
 
         command = [CLI_PATH, "-m", MODEL_PATH, "--vocabulary-file", KEYWORDS_PATH, OUTPUT_PATH]
+        language = load_language()
+        if language != "auto":
+            command.extend(["--language", language])
         for backend in ("auto", "cpu"):
             try:
                 result = subprocess.run(
